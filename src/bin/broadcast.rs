@@ -5,9 +5,12 @@ use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    io::{StdoutLock, Write},
+    io::StdoutLock,
     time::Duration,
 };
+
+pub const SYNC_INTERVAL: Duration = Duration::from_millis(200);
+pub const NEIGHBOR_SAMPLE_NOMINATOR: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -52,7 +55,7 @@ impl Node<(), Payload, InjectedPayload> for BroadcastNode {
             // generate gossip events
             // TODO: handle EOF signal
             loop {
-                std::thread::sleep(Duration::from_millis(300));
+                std::thread::sleep(SYNC_INTERVAL);
                 if let Err(_) = tx.send(Event::Injected(InjectedPayload::Gossip)) {
                     break;
                 }
@@ -141,6 +144,14 @@ impl Node<(), Payload, InjectedPayload> for BroadcastNode {
                         self.neighborhood = topology
                             .remove(&self.node)
                             .unwrap_or_else(|| panic!("no topology given for node {}", self.node));
+                        let mut rng = rand::thread_rng();
+                        // add random neighbors to the neighborhood
+                        let random_neighbors = self.known
+                            .keys()
+                            .into_iter()
+                            .filter(|n| (*n != &self.node && !self.neighborhood.contains(n) && rng.gen_ratio(NEIGHBOR_SAMPLE_NOMINATOR, 10)))
+                            .cloned().collect::<Vec<_>>();
+                        self.neighborhood.extend(random_neighbors);
                         reply.body.payload = Payload::TopologyOk;
                         reply.send(&mut *output).context("reply to topology")?;
                     }
